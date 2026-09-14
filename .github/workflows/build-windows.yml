@@ -1,0 +1,47 @@
+name: Build Windows EXE
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore DoodleRoadWorkshop.csproj
+      - name: Publish self-contained EXE
+        run: dotnet publish DoodleRoadWorkshop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o publish
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item publish/DoodleRoadWorkshop.exe package/DoodleRoadWorkshop.exe
+          @'
+          DOODLE ROAD WORKSHOP
+          ====================
+          Запуск: DoodleRoadWorkshop.exe
+          Сохранение: save.json рядом с игрой (создаётся автоматически).
+
+          Управление:
+          - Мышь: рисовать дорогу, ставить детали, нажимать кнопки
+          - Колесо мыши или A/D: двигать камеру во время строительства
+          - Стрелки / A,D: газ и тормоз во время поездки
+          - Пробел: включить установленные ракеты
+          - R: вернуться к строительству
+          - Esc: пауза
+          '@ | Set-Content -Path package/README.txt -Encoding UTF8
+      - name: Upload game
+        uses: actions/upload-artifact@v4
+        with:
+          name: DoodleRoadWorkshop-Windows
+          path: package
+          if-no-files-found: error
