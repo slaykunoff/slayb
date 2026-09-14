@@ -1,0 +1,69 @@
+name: Build Windows EXE
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore DoodleRoadWorkshop.csproj
+      - name: Publish self-contained EXE
+        run: dotnet publish DoodleRoadWorkshop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o publish
+      - name: Prepare ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item publish/DoodleRoadWorkshop.exe package/DoodleRoadWorkshop.exe
+          @'
+          DOODLE ROAD WORKSHOP
+          ====================
+          Запуск: DoodleRoadWorkshop.exe
+          Сохранение: save.json рядом с игрой (создаётся автоматически).
+
+          Управление:
+          - Мышь: рисовать дорогу, ставить детали, нажимать кнопки
+          - Колесо мыши или A/D: двигать камеру во время строительства
+          - Стрелки / A,D: газ и тормоз во время поездки
+          - Пробел: включить установленные ракеты
+          - R: вернуться к строительству
+          - Esc: пауза
+          - F11: полноэкранный режим
+          '@ | Set-Content -Path package/README.txt -Encoding UTF8
+          Compress-Archive -Path package/* -DestinationPath DoodleRoadWorkshop-Windows.zip -Force
+      - name: Validate EXE and ZIP
+        shell: pwsh
+        run: |
+          $exe = Get-Item package/DoodleRoadWorkshop.exe
+          $zip = Get-Item DoodleRoadWorkshop-Windows.zip
+          if ($exe.Length -lt 1000000) { throw "EXE is unexpectedly small" }
+          if ($zip.Length -lt 1000000) { throw "ZIP is unexpectedly small" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            if (-not ($archive.Entries | Where-Object { $_.Name -eq 'DoodleRoadWorkshop.exe' })) { throw "EXE is missing from ZIP" }
+          } finally { $archive.Dispose() }
+          Write-Host "Validated EXE $([math]::Round($exe.Length / 1MB, 1)) MB; ZIP $([math]::Round($zip.Length / 1MB, 1)) MB"
+      - name: Upload game artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DoodleRoadWorkshop-Windows
+          path: DoodleRoadWorkshop-Windows.zip
+          if-no-files-found: error
+      - name: Publish public release
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create doodle-road-v1.0.0 "DoodleRoadWorkshop-Windows.zip#DoodleRoadWorkshop-Windows.zip" --target "${{ github.event.pull_request.head.sha }}" --title "Doodle Road Workshop v1.0.0" --notes "Готовая автономная версия для Windows x64. Распакуй ZIP и запусти DoodleRoadWorkshop.exe. save.json создаётся рядом с игрой."
